@@ -91,10 +91,15 @@ def run():
             skipped += 1
             continue
 
+        logger.info(
+            "CHECK employee_id=%-6s cargo='%s' — sin asignación previa, procediendo al POST",
+            employee_id, name_role,
+        )
+
         payload = AssignPayload(
             employee_id=employee_id,
             item_id=role_cfg.item_id,
-            start_date=active_since,
+            start_date=active_since.replace(day=1),
             description=role_cfg.description,
             amount=role_cfg.amount,
         )

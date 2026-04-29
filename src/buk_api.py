@@ -52,7 +52,7 @@ def assign_mobility(payload: AssignPayload) -> dict:
         "end_date": "",
         "description": payload.description,
         "amount": payload.amount,
-        "advance_payment_day": 0,
+        "advance_payment_day": "",
         "overwrite_existing_assign": False,
         "cost_center": "",
     }
