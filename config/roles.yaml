@@ -1,0 +1,18 @@
+# Cargos especiales: define aquí los roles que requieren item_id, monto
+# o descripción distintos al valor por defecto.
+#
+# La clave es el valor EXACTO de la columna "name_role" en la tabla employees.
+# Si un cargo no aparece aquí, se usarán los valores del .env (DEFAULT_*).
+#
+# Estructura:
+# roles:
+#   "Nombre Exacto del Cargo":
+#     item_id: 1751
+#     amount: 40000
+#     description: "descripcion personalizada"
+
+roles:
+  "Key Account Manager":
+    item_id: 2108
+    amount: 125000
+    description: "movilizacion_2"

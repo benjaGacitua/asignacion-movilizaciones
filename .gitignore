@@ -1,0 +1,7 @@
+.env
+data/sent_records.json
+logs/*.log
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
