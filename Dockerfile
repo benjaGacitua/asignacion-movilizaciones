@@ -15,6 +15,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-RUN mkdir -p /app/data /app/logs
+RUN mkdir -p /app/data /app/logs \
+    && sed -i 's/\r//' /app/crontab
 
 CMD ["supercronic", "/app/crontab"]
