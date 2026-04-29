@@ -4,7 +4,7 @@ from datetime import date
 
 import requests
 
-from .buk_api import AssignPayload, assign_mobility
+from .buk_api import AssignPayload, assign_mobility, has_mobility_assign
 from .config import DEFAULT_ROLE, STATE_FILE, load_roles
 from .db import fetch_current_month_employees
 from .state import StateManager
@@ -67,6 +67,27 @@ def run():
         if role_cfg.amount == 0:
             logger.info("SKIP  employee_id=%-6s cargo='%s' (excluido por configuración)", employee_id, name_role)
             state.mark_sent(employee_id, current_month, "excluded", f"cargo={name_role}")
+            skipped += 1
+            continue
+
+        try:
+            already_assigned = has_mobility_assign(employee_id)
+        except requests.HTTPError as exc:
+            logger.error(
+                "ERROR employee_id=%-6s no se pudo consultar assigns en Buk — HTTP %s: %s",
+                employee_id,
+                exc.response.status_code if exc.response is not None else "?",
+                exc.response.text if exc.response is not None else str(exc),
+            )
+            failed += 1
+            continue
+
+        if already_assigned:
+            logger.info(
+                "SKIP  employee_id=%-6s cargo='%s' (asignación ya existe en Buk)",
+                employee_id, name_role,
+            )
+            state.mark_sent(employee_id, current_month, "already_in_buk", "item encontrado via GET assigns")
             skipped += 1
             continue
 
