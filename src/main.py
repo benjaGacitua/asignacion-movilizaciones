@@ -5,7 +5,7 @@ from datetime import date
 import requests
 
 from .buk_api import AssignPayload, assign_mobility, has_mobility_assign
-from .config import DEFAULT_ROLE, STATE_FILE, load_roles
+from .config import DEFAULT_ROLE, N8N_WEBHOOK_URL, STATE_FILE, load_roles
 from .db import fetch_current_month_employees
 from .state import StateManager
 
@@ -49,7 +49,8 @@ def run():
 
     logger.info("Nuevos ingresos en el mes: %d", len(employees))
 
-    sent = skipped = failed = 0
+    sent = skipped = failed = already_processed = 0
+    detail_rows: list[dict] = []
 
     for emp in employees:
         employee_id = int(emp["id"])
@@ -57,8 +58,8 @@ def run():
         active_since: date = emp["active_since"]
 
         if state.is_sent(employee_id, current_month):
-            logger.info("SKIP  employee_id=%-6s (ya enviado este mes)", employee_id)
-            skipped += 1
+            logger.debug("SKIP  employee_id=%-6s (ya procesado en ejecución anterior)", employee_id)
+            already_processed += 1
             continue
 
         role_cfg = resolve_role(name_role, roles)
@@ -67,18 +68,21 @@ def run():
         if role_cfg.amount == 0:
             logger.info("SKIP  employee_id=%-6s cargo='%s' (excluido por configuración)", employee_id, name_role)
             state.mark_sent(employee_id, current_month, "excluded", f"cargo={name_role}")
+            detail_rows.append({"employee_id": employee_id, "cargo": name_role, "estado": "omitido", "detalle": "cargo excluido"})
             skipped += 1
             continue
 
         try:
             already_assigned = has_mobility_assign(employee_id)
         except requests.HTTPError as exc:
+            detail = exc.response.text if exc.response is not None else str(exc)
             logger.error(
                 "ERROR employee_id=%-6s no se pudo consultar assigns en Buk — HTTP %s: %s",
                 employee_id,
                 exc.response.status_code if exc.response is not None else "?",
-                exc.response.text if exc.response is not None else str(exc),
+                detail,
             )
+            detail_rows.append({"employee_id": employee_id, "cargo": name_role, "estado": "error", "detalle": f"GET assigns falló: {detail}"})
             failed += 1
             continue
 
@@ -88,6 +92,7 @@ def run():
                 employee_id, name_role,
             )
             state.mark_sent(employee_id, current_month, "already_in_buk", "item encontrado via GET assigns")
+            detail_rows.append({"employee_id": employee_id, "cargo": name_role, "estado": "omitido", "detalle": "ya tiene movilización en Buk"})
             skipped += 1
             continue
 
@@ -111,6 +116,7 @@ def run():
                 "OK    employee_id=%-6s cargo='%s' monto=%s ingreso=%s",
                 employee_id, name_role, role_cfg.amount, active_since,
             )
+            detail_rows.append({"employee_id": employee_id, "cargo": name_role, "estado": "enviado", "detalle": f"monto={role_cfg.amount}"})
             sent += 1
         except requests.HTTPError as exc:
             detail = exc.response.text if exc.response is not None else str(exc)
@@ -119,17 +125,42 @@ def run():
                 "ERROR employee_id=%-6s cargo='%s' — HTTP %s: %s",
                 employee_id, name_role, exc.response.status_code if exc.response is not None else "?", detail,
             )
+            detail_rows.append({"employee_id": employee_id, "cargo": name_role, "estado": "error", "detalle": detail})
             failed += 1
         except Exception as exc:
             logger.error("ERROR employee_id=%-6s error inesperado: %s", employee_id, exc)
+            detail_rows.append({"employee_id": employee_id, "cargo": name_role, "estado": "error", "detalle": str(exc)})
             failed += 1
 
     logger.info("=" * 60)
-    logger.info("Resumen: enviados=%d  omitidos=%d  errores=%d", sent, skipped, failed)
+    logger.info("Resumen: enviados=%d  omitidos=%d  errores=%d  (ya procesados mes=%d)", sent, skipped, failed, already_processed)
     logger.info("=" * 60)
+
+    _notify_n8n(current_month, sent, skipped, failed, already_processed, detail_rows)
 
     if failed:
         sys.exit(1)
+
+
+def _notify_n8n(month: str, sent: int, skipped: int, failed: int, already_processed: int, rows: list[dict]):
+    if not N8N_WEBHOOK_URL:
+        return
+    payload = {
+        "mes": month,
+        "resumen": {
+            "enviados": sent,
+            "omitidos": skipped,
+            "errores": failed,
+            "ya_procesados_mes": already_processed,
+        },
+        "detalle": rows,
+    }
+    try:
+        r = requests.post(N8N_WEBHOOK_URL, json=payload, timeout=15)
+        r.raise_for_status()
+        logger.info("Notificación enviada a n8n (HTTP %s)", r.status_code)
+    except Exception as exc:
+        logger.warning("No se pudo notificar a n8n: %s", exc)
 
 
 if __name__ == "__main__":

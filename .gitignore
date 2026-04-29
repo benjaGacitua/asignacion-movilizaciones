@@ -1,6 +1,7 @@
 .env
 data/sent_records.json
 logs/*.log
+n8n-workflow.json
 __pycache__/
 *.pyc
 *.pyo

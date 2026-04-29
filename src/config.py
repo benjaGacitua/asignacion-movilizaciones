@@ -72,6 +72,7 @@ DEFAULT_ROLE = RoleConfig(
 )
 
 STATE_FILE = Path(os.getenv("STATE_FILE", "data/sent_records.json"))
+N8N_WEBHOOK_URL = os.getenv("N8N_WEBHOOK_URL", "")
 CONFIG_DIR = Path(os.getenv("CONFIG_DIR", "config"))
 
 
