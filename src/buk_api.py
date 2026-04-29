@@ -35,12 +35,11 @@ def has_mobility_assign(employee_id: int) -> bool:
     response = _SESSION.get(url, headers=_headers(), timeout=30)
     response.raise_for_status()
     data = response.json()
-    assigns = data if isinstance(data, list) else data.get("assigns", [])
-    found = any(a.get("item_id") in _MOBILITY_ITEM_IDS for a in assigns)
-    if found:
-        matched = [a.get("item_id") for a in assigns if a.get("item_id") in _MOBILITY_ITEM_IDS]
-        logger.debug("employee_id=%s ya tiene asignación de movilización: item_ids=%s", employee_id, matched)
-    return found
+    assigns = data.get("data", [])
+    matched = [a["item"]["id"] for a in assigns if a.get("item", {}).get("id") in _MOBILITY_ITEM_IDS]
+    if matched:
+        logger.debug("employee_id=%s ya tiene movilización asignada: item_ids=%s", employee_id, matched)
+    return bool(matched)
 
 
 def assign_mobility(payload: AssignPayload) -> dict:
