@@ -1,2 +1,2 @@
 # Ejecuta el proceso de asignación de movilizaciones cada día a las 08:00 (hora del contenedor)
-0 8 * * * cd /app && python -m src.main >> /app/logs/movilizaciones.log 2>&1
+0 8 * * * cd /app && /usr/local/bin/python -m src.main >> /app/logs/movilizaciones.log 2>&1
