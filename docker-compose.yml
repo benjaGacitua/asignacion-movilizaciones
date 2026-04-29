@@ -2,7 +2,6 @@ services:
   movilizaciones:
     build: .
     container_name: asignacion_movilizaciones
-    restart: unless-stopped
     env_file:
       - .env
     volumes:
