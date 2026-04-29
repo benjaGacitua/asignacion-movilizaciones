@@ -1,4 +1,5 @@
 import logging
+import os
 import sys
 from datetime import date
 
@@ -8,8 +9,6 @@ from .buk_api import AssignPayload, assign_mobility, has_mobility_assign
 from .config import DEFAULT_ROLE, N8N_WEBHOOK_URL, STATE_FILE, load_roles
 from .db import fetch_current_month_employees
 from .state import StateManager
-
-import os
 
 _LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
@@ -27,7 +26,7 @@ def resolve_role(name_role: str, roles: dict):
     return DEFAULT_ROLE
 
 
-def run():
+def run_and_return() -> dict:
     today = date.today()
     current_month = today.strftime("%Y-%m")
 
@@ -45,7 +44,7 @@ def run():
         employees = fetch_current_month_employees()
     except Exception as exc:
         logger.error("Error al conectar con la base de datos: %s", exc)
-        sys.exit(1)
+        raise
 
     logger.info("Nuevos ingresos en el mes: %d", len(employees))
 
@@ -64,7 +63,6 @@ def run():
 
         role_cfg = resolve_role(name_role, roles)
 
-        # Cargos con amount=0 están excluidos de movilización
         if role_cfg.amount == 0:
             logger.info("SKIP  employee_id=%-6s cargo='%s' (excluido por configuración)", employee_id, name_role)
             state.mark_sent(employee_id, current_month, "excluded", f"cargo={name_role}")
@@ -87,21 +85,15 @@ def run():
             continue
 
         if already_assigned:
-            logger.info(
-                "SKIP  employee_id=%-6s cargo='%s' (asignación ya existe en Buk)",
-                employee_id, name_role,
-            )
+            logger.info("SKIP  employee_id=%-6s cargo='%s' (asignación ya existe en Buk)", employee_id, name_role)
             state.mark_sent(employee_id, current_month, "already_in_buk", "item encontrado via GET assigns")
             detail_rows.append({"employee_id": employee_id, "cargo": name_role, "estado": "omitido", "detalle": "ya tiene movilización en Buk"})
             skipped += 1
             continue
 
-        logger.info(
-            "CHECK employee_id=%-6s cargo='%s' — sin asignación previa, procediendo al POST",
-            employee_id, name_role,
-        )
+        logger.info("CHECK employee_id=%-6s cargo='%s' — sin asignación previa, procediendo al POST", employee_id, name_role)
 
-        payload = AssignPayload(
+        assign_payload = AssignPayload(
             employee_id=employee_id,
             item_id=role_cfg.item_id,
             start_date=active_since.replace(day=1),
@@ -110,21 +102,15 @@ def run():
         )
 
         try:
-            result = assign_mobility(payload)
+            result = assign_mobility(assign_payload)
             state.mark_sent(employee_id, current_month, "success", str(result))
-            logger.info(
-                "OK    employee_id=%-6s cargo='%s' monto=%s ingreso=%s",
-                employee_id, name_role, role_cfg.amount, active_since,
-            )
+            logger.info("OK    employee_id=%-6s cargo='%s' monto=%s ingreso=%s", employee_id, name_role, role_cfg.amount, active_since)
             detail_rows.append({"employee_id": employee_id, "cargo": name_role, "estado": "enviado", "detalle": f"monto={role_cfg.amount}"})
             sent += 1
         except requests.HTTPError as exc:
             detail = exc.response.text if exc.response is not None else str(exc)
             state.mark_sent(employee_id, current_month, "error", detail)
-            logger.error(
-                "ERROR employee_id=%-6s cargo='%s' — HTTP %s: %s",
-                employee_id, name_role, exc.response.status_code if exc.response is not None else "?", detail,
-            )
+            logger.error("ERROR employee_id=%-6s cargo='%s' — HTTP %s: %s", employee_id, name_role, exc.response.status_code if exc.response is not None else "?", detail)
             detail_rows.append({"employee_id": employee_id, "cargo": name_role, "estado": "error", "detalle": detail})
             failed += 1
         except Exception as exc:
@@ -136,31 +122,37 @@ def run():
     logger.info("Resumen: enviados=%d  omitidos=%d  errores=%d  (ya procesados mes=%d)", sent, skipped, failed, already_processed)
     logger.info("=" * 60)
 
-    _notify_n8n(current_month, sent, skipped, failed, already_processed, detail_rows)
-
-    if failed:
-        sys.exit(1)
-
-
-def _notify_n8n(month: str, sent: int, skipped: int, failed: int, already_processed: int, rows: list[dict]):
-    if not N8N_WEBHOOK_URL:
-        return
-    payload = {
-        "mes": month,
+    return {
+        "mes": current_month,
         "resumen": {
             "enviados": sent,
             "omitidos": skipped,
             "errores": failed,
             "ya_procesados_mes": already_processed,
         },
-        "detalle": rows,
+        "detalle": detail_rows,
     }
+
+
+def _notify_n8n(result: dict):
+    if not N8N_WEBHOOK_URL:
+        return
     try:
-        r = requests.post(N8N_WEBHOOK_URL, json=payload, timeout=15)
+        r = requests.post(N8N_WEBHOOK_URL, json=result, timeout=15)
         r.raise_for_status()
-        logger.info("Notificación enviada a n8n (HTTP %s)", r.status_code)
+        logger.info("Notificacion enviada a n8n (HTTP %s)", r.status_code)
     except Exception as exc:
         logger.warning("No se pudo notificar a n8n: %s", exc)
+
+
+def run():
+    try:
+        result = run_and_return()
+    except Exception:
+        sys.exit(1)
+    _notify_n8n(result)
+    if result["resumen"]["errores"]:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -16,6 +16,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 RUN mkdir -p /app/data /app/logs \
-    && sed -i 's/\r//' /app/crontab
+    && printf '0 8 * * * cd /app && /usr/local/bin/python -m src.main >> /app/logs/movilizaciones.log 2>&1\n' > /app/crontab
 
 CMD ["supercronic", "/app/crontab"]
