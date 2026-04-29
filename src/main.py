@@ -138,7 +138,7 @@ def _notify_n8n(result: dict):
     if not N8N_WEBHOOK_URL:
         return
     try:
-        r = requests.post(N8N_WEBHOOK_URL, json=result, timeout=15)
+        r = requests.post(N8N_WEBHOOK_URL, json=result, timeout=15, verify=False)
         r.raise_for_status()
         logger.info("Notificacion enviada a n8n (HTTP %s)", r.status_code)
     except Exception as exc:
