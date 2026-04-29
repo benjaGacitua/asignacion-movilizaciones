@@ -51,7 +51,7 @@ def fetch_current_month_employees() -> list[dict]:
 
     query = """
         SELECT id, name_role, active_since
-        FROM employees
+        FROM rh.employees
         WHERE active_since >= %s
           AND active_since <= %s
         ORDER BY active_since;
