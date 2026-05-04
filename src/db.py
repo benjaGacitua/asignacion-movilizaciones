@@ -52,7 +52,7 @@ def fetch_pending_employees() -> list[dict]:
     cutoff = today - timedelta(days=lookback_days)
 
     query = """
-        SELECT id, name_role, active_since
+        SELECT id, full_name, name_role, active_since
         FROM rh.employees
         WHERE active_since >= %s
           AND active_since <= %s
@@ -62,8 +62,8 @@ def fetch_pending_employees() -> list[dict]:
         with conn.cursor() as cur:
             cur.execute(query, (cutoff, today))
             rows = cur.fetchall()
-            logger.debug(
-                "Query ejecutada: %d registros entre %s y %s",
-                len(rows), cutoff, today,
+            logger.info(
+                "Rango evaluado: %s → %s | Registros encontrados: %d",
+                cutoff, today, len(rows),
             )
             return [dict(r) for r in rows]
