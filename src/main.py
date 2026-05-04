@@ -50,6 +50,11 @@ def run_and_return() -> dict:
         raise
 
     logger.info("Empleados a evaluar: %d", len(employees))
+    for i, emp in enumerate(employees, 1):
+        logger.info(
+            "  [%d] id=%-6s '%s' cargo='%s' ingreso=%s",
+            i, int(emp["id"]), emp.get("full_name") or "", emp.get("name_role") or "", emp["active_since"],
+        )
 
     sent = skipped = failed = already_processed = 0
     detail_rows: list[dict] = []
