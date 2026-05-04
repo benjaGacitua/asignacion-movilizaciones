@@ -7,7 +7,7 @@ import requests
 
 from .buk_api import AssignPayload, assign_mobility, has_mobility_assign
 from .config import DEFAULT_ROLE, N8N_WEBHOOK_URL, STATE_FILE, load_roles
-from .db import fetch_current_month_employees
+from .db import fetch_pending_employees
 from .state import StateManager
 
 _LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -31,7 +31,7 @@ def run_and_return() -> dict:
     current_month = today.strftime("%Y-%m")
 
     logger.info("=" * 60)
-    logger.info("Proceso movilizaciones — mes %s", current_month)
+    logger.info("Proceso movilizaciones — %s", today.isoformat())
     logger.info("=" * 60)
 
     roles = load_roles()
@@ -41,12 +41,12 @@ def run_and_return() -> dict:
     state = StateManager(STATE_FILE)
 
     try:
-        employees = fetch_current_month_employees()
+        employees = fetch_pending_employees()
     except Exception as exc:
         logger.error("Error al conectar con la base de datos: %s", exc)
         raise
 
-    logger.info("Nuevos ingresos en el mes: %d", len(employees))
+    logger.info("Empleados a evaluar: %d", len(employees))
 
     sent = skipped = failed = already_processed = 0
     detail_rows: list[dict] = []
@@ -55,9 +55,10 @@ def run_and_return() -> dict:
         employee_id = int(emp["id"])
         name_role = emp.get("name_role") or ""
         active_since: date = emp["active_since"]
+        emp_month = active_since.strftime("%Y-%m")
 
-        if state.is_sent(employee_id, current_month):
-            logger.debug("SKIP  employee_id=%-6s (ya procesado en ejecución anterior)", employee_id)
+        if state.is_sent(employee_id, emp_month):
+            logger.debug("SKIP  employee_id=%-6s emp_month=%s (ya procesado)", employee_id, emp_month)
             already_processed += 1
             continue
 
@@ -65,7 +66,7 @@ def run_and_return() -> dict:
 
         if role_cfg.amount == 0:
             logger.info("SKIP  employee_id=%-6s cargo='%s' (excluido por configuración)", employee_id, name_role)
-            state.mark_sent(employee_id, current_month, "excluded", f"cargo={name_role}")
+            state.mark_sent(employee_id, emp_month, "excluded", f"cargo={name_role}")
             detail_rows.append({"employee_id": employee_id, "cargo": name_role, "estado": "omitido", "detalle": "cargo excluido"})
             skipped += 1
             continue
@@ -86,7 +87,7 @@ def run_and_return() -> dict:
 
         if already_assigned:
             logger.info("SKIP  employee_id=%-6s cargo='%s' (asignación ya existe en Buk)", employee_id, name_role)
-            state.mark_sent(employee_id, current_month, "already_in_buk", "item encontrado via GET assigns")
+            state.mark_sent(employee_id, emp_month, "already_in_buk", "item encontrado via GET assigns")
             detail_rows.append({"employee_id": employee_id, "cargo": name_role, "estado": "omitido", "detalle": "ya tiene movilización en Buk"})
             skipped += 1
             continue
@@ -103,13 +104,13 @@ def run_and_return() -> dict:
 
         try:
             result = assign_mobility(assign_payload)
-            state.mark_sent(employee_id, current_month, "success", str(result))
+            state.mark_sent(employee_id, emp_month, "success", str(result))
             logger.info("OK    employee_id=%-6s cargo='%s' monto=%s ingreso=%s", employee_id, name_role, role_cfg.amount, active_since)
             detail_rows.append({"employee_id": employee_id, "cargo": name_role, "estado": "enviado", "detalle": f"monto={role_cfg.amount}"})
             sent += 1
         except requests.HTTPError as exc:
             detail = exc.response.text if exc.response is not None else str(exc)
-            state.mark_sent(employee_id, current_month, "error", detail)
+            state.mark_sent(employee_id, emp_month, "error", detail)
             logger.error("ERROR employee_id=%-6s cargo='%s' — HTTP %s: %s", employee_id, name_role, exc.response.status_code if exc.response is not None else "?", detail)
             detail_rows.append({"employee_id": employee_id, "cargo": name_role, "estado": "error", "detalle": detail})
             failed += 1
@@ -119,7 +120,7 @@ def run_and_return() -> dict:
             failed += 1
 
     logger.info("=" * 60)
-    logger.info("Resumen: enviados=%d  omitidos=%d  errores=%d  (ya procesados mes=%d)", sent, skipped, failed, already_processed)
+    logger.info("Resumen: enviados=%d  omitidos=%d  errores=%d  (ya procesados=%d)", sent, skipped, failed, already_processed)
     logger.info("=" * 60)
 
     return {

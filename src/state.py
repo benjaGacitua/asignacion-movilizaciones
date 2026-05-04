@@ -26,10 +26,13 @@ class StateManager:
     def _key(employee_id: int, month: str) -> str:
         return f"{employee_id}_{month}"
 
+    # Statuses that mean "no action needed, don't reprocess"
+    _FINAL_STATUSES = {"success", "excluded", "already_in_buk"}
+
     def is_sent(self, employee_id: int, month: str) -> bool:
         key = self._key(employee_id, month)
         return any(
-            r["key"] == key and r["status"] == "success"
+            r["key"] == key and r["status"] in self._FINAL_STATUSES
             for r in self._data["sent"]
         )
 

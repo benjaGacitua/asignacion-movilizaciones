@@ -1,6 +1,7 @@
 import logging
+import os
 from contextlib import contextmanager
-from datetime import date
+from datetime import date, timedelta
 
 import psycopg2
 import psycopg2.extras
@@ -45,9 +46,10 @@ def get_connection():
             conn.close()
 
 
-def fetch_current_month_employees() -> list[dict]:
+def fetch_pending_employees() -> list[dict]:
     today = date.today()
-    first_of_month = today.replace(day=1)
+    lookback_days = int(os.getenv("LOOKBACK_DAYS", "15"))
+    cutoff = today - timedelta(days=lookback_days)
 
     query = """
         SELECT id, name_role, active_since
@@ -58,10 +60,10 @@ def fetch_current_month_employees() -> list[dict]:
     """
     with get_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute(query, (first_of_month, today))
+            cur.execute(query, (cutoff, today))
             rows = cur.fetchall()
             logger.debug(
                 "Query ejecutada: %d registros entre %s y %s",
-                len(rows), first_of_month, today,
+                len(rows), cutoff, today,
             )
             return [dict(r) for r in rows]
