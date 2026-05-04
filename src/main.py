@@ -73,10 +73,12 @@ def run_and_return() -> dict:
 
         role_cfg = resolve_role(name_role, roles)
 
+        ingreso = active_since.isoformat()
+
         if role_cfg.amount == 0:
             logger.info("SKIP  employee_id=%-6s '%s' cargo='%s' (excluido por configuración)", employee_id, full_name, name_role)
             state.mark_sent(employee_id, emp_month, "excluded", f"cargo={name_role}")
-            detail_rows.append({"employee_id": employee_id, "nombre": full_name, "cargo": name_role, "estado": "omitido", "detalle": "cargo excluido"})
+            detail_rows.append({"employee_id": employee_id, "nombre": full_name, "cargo": name_role, "ingreso": ingreso, "estado": "omitido", "detalle": "cargo excluido"})
             skipped += 1
             continue
 
@@ -90,14 +92,14 @@ def run_and_return() -> dict:
                 exc.response.status_code if exc.response is not None else "?",
                 detail,
             )
-            detail_rows.append({"employee_id": employee_id, "nombre": full_name, "cargo": name_role, "estado": "error", "detalle": f"GET assigns falló: {detail}"})
+            detail_rows.append({"employee_id": employee_id, "nombre": full_name, "cargo": name_role, "ingreso": ingreso, "estado": "error", "detalle": f"GET assigns falló: {detail}"})
             failed += 1
             continue
 
         if already_assigned:
             logger.info("SKIP  employee_id=%-6s '%s' cargo='%s' (asignación ya existe en Buk)", employee_id, full_name, name_role)
             state.mark_sent(employee_id, emp_month, "already_in_buk", "item encontrado via GET assigns")
-            detail_rows.append({"employee_id": employee_id, "nombre": full_name, "cargo": name_role, "estado": "omitido", "detalle": "ya tiene movilización en Buk"})
+            detail_rows.append({"employee_id": employee_id, "nombre": full_name, "cargo": name_role, "ingreso": ingreso, "estado": "omitido", "detalle": "ya tiene movilización en Buk"})
             skipped += 1
             continue
 
@@ -115,17 +117,17 @@ def run_and_return() -> dict:
             result = assign_mobility(assign_payload)
             state.mark_sent(employee_id, emp_month, "success", str(result))
             logger.info("OK    employee_id=%-6s '%s' cargo='%s' monto=%s ingreso=%s", employee_id, full_name, name_role, role_cfg.amount, active_since)
-            detail_rows.append({"employee_id": employee_id, "nombre": full_name, "cargo": name_role, "estado": "enviado", "detalle": f"monto={role_cfg.amount}"})
+            detail_rows.append({"employee_id": employee_id, "nombre": full_name, "cargo": name_role, "ingreso": ingreso, "estado": "enviado", "detalle": f"monto={role_cfg.amount}"})
             sent += 1
         except requests.HTTPError as exc:
             detail = exc.response.text if exc.response is not None else str(exc)
             state.mark_sent(employee_id, emp_month, "error", detail)
             logger.error("ERROR employee_id=%-6s '%s' cargo='%s' — HTTP %s: %s", employee_id, full_name, name_role, exc.response.status_code if exc.response is not None else "?", detail)
-            detail_rows.append({"employee_id": employee_id, "nombre": full_name, "cargo": name_role, "estado": "error", "detalle": detail})
+            detail_rows.append({"employee_id": employee_id, "nombre": full_name, "cargo": name_role, "ingreso": ingreso, "estado": "error", "detalle": detail})
             failed += 1
         except Exception as exc:
             logger.error("ERROR employee_id=%-6s '%s' error inesperado: %s", employee_id, full_name, exc)
-            detail_rows.append({"employee_id": employee_id, "nombre": full_name, "cargo": name_role, "estado": "error", "detalle": str(exc)})
+            detail_rows.append({"employee_id": employee_id, "nombre": full_name, "cargo": name_role, "ingreso": ingreso, "estado": "error", "detalle": str(exc)})
             failed += 1
 
     logger.info("=" * 60)
