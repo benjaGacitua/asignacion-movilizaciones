@@ -76,17 +76,22 @@ N8N_WEBHOOK_URL = os.getenv("N8N_WEBHOOK_URL", "")
 CONFIG_DIR = Path(os.getenv("CONFIG_DIR", "config"))
 
 
-def load_roles() -> dict[str, RoleConfig]:
+def load_roles() -> dict[str, list[RoleConfig]]:
     roles_path = CONFIG_DIR / "roles.yaml"
     if not roles_path.exists():
         return {}
     with open(roles_path, encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
     return {
-        name: RoleConfig(
-            item_id=cfg["item_id"],
-            amount=cfg["amount"],
-            description=cfg["description"],
-        )
-        for name, cfg in (data.get("roles") or {}).items()
+        # ponytail: se acepta un dict suelto además de la lista, para no romper
+        # roles.yaml antiguos de un solo item.
+        name: [
+            RoleConfig(
+                item_id=cfg["item_id"],
+                amount=cfg["amount"],
+                description=cfg["description"],
+            )
+            for cfg in (items if isinstance(items, list) else [items])
+        ]
+        for name, items in (data.get("roles") or {}).items()
     }

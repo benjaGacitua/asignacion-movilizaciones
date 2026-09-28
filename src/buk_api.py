@@ -9,7 +9,6 @@ from .config import BUK
 logger = logging.getLogger(__name__)
 
 _SESSION = requests.Session()
-_MOBILITY_ITEM_IDS = {1751, 2108}
 
 
 @dataclass
@@ -29,17 +28,20 @@ def _headers() -> dict:
     }
 
 
-def has_mobility_assign(employee_id: int) -> bool:
+def assigned_item_ids(employee_id: int) -> set[int]:
+    """item_ids ya asignados al empleado en Buk."""
     url = f"{BUK.base_url}/api/v1/chile/employees/{employee_id}/assigns"
     logger.debug("GET %s", url)
     response = _SESSION.get(url, headers=_headers(), timeout=30)
     response.raise_for_status()
     data = response.json()
-    assigns = data.get("data", [])
-    matched = [a["item"]["id"] for a in assigns if a.get("item", {}).get("id") in _MOBILITY_ITEM_IDS]
-    if matched:
-        logger.debug("employee_id=%s ya tiene movilización asignada: item_ids=%s", employee_id, matched)
-    return bool(matched)
+    ids = {
+        a["item"]["id"]
+        for a in data.get("data", [])
+        if a.get("item", {}).get("id") is not None
+    }
+    logger.debug("employee_id=%s items ya asignados: %s", employee_id, sorted(ids))
+    return ids
 
 
 def assign_mobility(payload: AssignPayload) -> dict:

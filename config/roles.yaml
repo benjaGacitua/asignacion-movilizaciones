@@ -2,17 +2,23 @@
 # o descripción distintos al valor por defecto.
 #
 # La clave es el valor EXACTO de la columna "name_role" en la tabla employees.
-# Si un cargo no aparece aquí, se usarán los valores del .env (DEFAULT_*).
+# Si un cargo no aparece aquí, se usan los valores por defecto (DEFAULT_*).
+#
+# Cada cargo es una LISTA de items: se asignan todos.
+# amount: 0 en el primer item excluye al cargo del proceso.
 #
 # Estructura:
 # roles:
 #   "Nombre Exacto del Cargo":
-#     item_id: 1751
-#     amount: 40000
-#     description: "descripcion personalizada"
+#     - item_id: 1751
+#       amount: 40000
+#       description: "descripcion personalizada"
 
 roles:
   "Key Account Manager":
-    item_id: 2108
-    amount: 125000
-    description: "movilizacion_2"
+    - item_id: 2108
+      amount: 125000
+      description: "movilizacion_2"
+    - item_id: 1746
+      amount: 250000
+      description: "asignacion_desgaste"

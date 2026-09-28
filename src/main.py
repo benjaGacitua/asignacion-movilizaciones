@@ -5,7 +5,7 @@ from datetime import date, timedelta
 
 import requests
 
-from .buk_api import AssignPayload, assign_mobility, has_mobility_assign
+from .buk_api import AssignPayload, assign_mobility, assigned_item_ids
 from .config import DEFAULT_ROLE, N8N_WEBHOOK_URL, STATE_FILE, load_roles
 from .db import fetch_pending_employees
 from .state import StateManager
@@ -19,11 +19,12 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def resolve_role(name_role: str, roles: dict):
+def resolve_role(name_role: str, roles: dict) -> list:
+    """Items a asignar para el cargo. Siempre una lista."""
     if name_role in roles:
         logger.debug("Cargo '%s' encontrado en roles especiales", name_role)
         return roles[name_role]
-    return DEFAULT_ROLE
+    return [DEFAULT_ROLE]
 
 
 def run_and_return() -> dict:
@@ -71,11 +72,11 @@ def run_and_return() -> dict:
             already_processed += 1
             continue
 
-        role_cfg = resolve_role(name_role, roles)
+        role_items = resolve_role(name_role, roles)
 
         ingreso = active_since.isoformat()
 
-        if role_cfg.amount == 0:
+        if role_items[0].amount == 0:
             logger.info("SKIP  employee_id=%-6s '%s' cargo='%s' (excluido por configuración)", employee_id, full_name, name_role)
             state.mark_sent(employee_id, emp_month, "excluded", f"cargo={name_role}")
             detail_rows.append({"employee_id": employee_id, "nombre": full_name, "cargo": name_role, "ingreso": ingreso, "estado": "omitido", "detalle": "cargo excluido"})
@@ -83,7 +84,7 @@ def run_and_return() -> dict:
             continue
 
         try:
-            already_assigned = has_mobility_assign(employee_id)
+            existing_items = assigned_item_ids(employee_id)
         except requests.HTTPError as exc:
             detail = exc.response.text if exc.response is not None else str(exc)
             logger.error(
@@ -96,39 +97,55 @@ def run_and_return() -> dict:
             failed += 1
             continue
 
-        if already_assigned:
-            logger.info("SKIP  employee_id=%-6s '%s' cargo='%s' (asignación ya existe en Buk)", employee_id, full_name, name_role)
-            state.mark_sent(employee_id, emp_month, "already_in_buk", "item encontrado via GET assigns")
-            detail_rows.append({"employee_id": employee_id, "nombre": full_name, "cargo": name_role, "ingreso": ingreso, "estado": "omitido", "detalle": "ya tiene movilización en Buk"})
-            skipped += 1
-            continue
+        emp_results = []  # status por item, para decidir el estado final del empleado
 
-        logger.info("CHECK employee_id=%-6s '%s' cargo='%s' — sin asignación previa, procediendo al POST", employee_id, full_name, name_role)
+        for role_cfg in role_items:
+            item_label = f"{role_cfg.description}(item={role_cfg.item_id})"
 
-        assign_payload = AssignPayload(
-            employee_id=employee_id,
-            item_id=role_cfg.item_id,
-            start_date=active_since.replace(day=1),
-            description=role_cfg.description,
-            amount=role_cfg.amount,
-        )
+            if role_cfg.item_id in existing_items:
+                logger.info("SKIP  employee_id=%-6s '%s' cargo='%s' %s (asignación ya existe en Buk)", employee_id, full_name, name_role, item_label)
+                detail_rows.append({"employee_id": employee_id, "nombre": full_name, "cargo": name_role, "ingreso": ingreso, "item": item_label, "estado": "omitido", "detalle": "ya asignado en Buk"})
+                emp_results.append("already_in_buk")
+                skipped += 1
+                continue
 
-        try:
-            result = assign_mobility(assign_payload)
-            state.mark_sent(employee_id, emp_month, "success", str(result))
-            logger.info("OK    employee_id=%-6s '%s' cargo='%s' monto=%s ingreso=%s", employee_id, full_name, name_role, role_cfg.amount, active_since)
-            detail_rows.append({"employee_id": employee_id, "nombre": full_name, "cargo": name_role, "ingreso": ingreso, "estado": "enviado", "detalle": f"monto={role_cfg.amount}"})
-            sent += 1
-        except requests.HTTPError as exc:
-            detail = exc.response.text if exc.response is not None else str(exc)
-            state.mark_sent(employee_id, emp_month, "error", detail)
-            logger.error("ERROR employee_id=%-6s '%s' cargo='%s' — HTTP %s: %s", employee_id, full_name, name_role, exc.response.status_code if exc.response is not None else "?", detail)
-            detail_rows.append({"employee_id": employee_id, "nombre": full_name, "cargo": name_role, "ingreso": ingreso, "estado": "error", "detalle": detail})
-            failed += 1
-        except Exception as exc:
-            logger.error("ERROR employee_id=%-6s '%s' error inesperado: %s", employee_id, full_name, exc)
-            detail_rows.append({"employee_id": employee_id, "nombre": full_name, "cargo": name_role, "ingreso": ingreso, "estado": "error", "detalle": str(exc)})
-            failed += 1
+            logger.info("CHECK employee_id=%-6s '%s' cargo='%s' %s — sin asignación previa, procediendo al POST", employee_id, full_name, name_role, item_label)
+
+            assign_payload = AssignPayload(
+                employee_id=employee_id,
+                item_id=role_cfg.item_id,
+                start_date=active_since.replace(day=1),
+                description=role_cfg.description,
+                amount=role_cfg.amount,
+            )
+
+            try:
+                assign_mobility(assign_payload)
+                logger.info("OK    employee_id=%-6s '%s' cargo='%s' %s monto=%s ingreso=%s", employee_id, full_name, name_role, item_label, role_cfg.amount, active_since)
+                detail_rows.append({"employee_id": employee_id, "nombre": full_name, "cargo": name_role, "ingreso": ingreso, "item": item_label, "estado": "enviado", "detalle": f"monto={role_cfg.amount}"})
+                emp_results.append("success")
+                sent += 1
+            except requests.HTTPError as exc:
+                detail = exc.response.text if exc.response is not None else str(exc)
+                logger.error("ERROR employee_id=%-6s '%s' cargo='%s' %s — HTTP %s: %s", employee_id, full_name, name_role, item_label, exc.response.status_code if exc.response is not None else "?", detail)
+                detail_rows.append({"employee_id": employee_id, "nombre": full_name, "cargo": name_role, "ingreso": ingreso, "item": item_label, "estado": "error", "detalle": detail})
+                emp_results.append(f"error: {detail}")
+                failed += 1
+            except Exception as exc:
+                logger.error("ERROR employee_id=%-6s '%s' %s error inesperado: %s", employee_id, full_name, item_label, exc)
+                detail_rows.append({"employee_id": employee_id, "nombre": full_name, "cargo": name_role, "ingreso": ingreso, "item": item_label, "estado": "error", "detalle": str(exc)})
+                emp_results.append(f"error: {exc}")
+                failed += 1
+
+        # Sólo se marca como final si TODOS los items quedaron ok; si alguno falló,
+        # el empleado se reprocesa y los items ya asignados se omiten por existing_items.
+        errors = [r for r in emp_results if r.startswith("error")]
+        if errors:
+            state.mark_sent(employee_id, emp_month, "error", "; ".join(errors))
+        elif all(r == "already_in_buk" for r in emp_results):
+            state.mark_sent(employee_id, emp_month, "already_in_buk", "todos los items ya existían en Buk")
+        else:
+            state.mark_sent(employee_id, emp_month, "success", f"items={len(emp_results)}")
 
     logger.info("=" * 60)
     logger.info("Resumen: enviados=%d  omitidos=%d  errores=%d  (ya procesados=%d)", sent, skipped, failed, already_processed)
